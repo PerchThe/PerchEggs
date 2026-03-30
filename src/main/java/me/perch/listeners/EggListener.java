@@ -120,11 +120,7 @@ public class EggListener implements Listener {
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK && event.getClickedBlock() != null) {
             Block block = event.getClickedBlock();
 
-            if (!player.isSneaking()) {
-                if (block.getType().isInteractable()) return;
-
-                if (event.useInteractedBlock() != org.bukkit.event.Event.Result.DENY) return;
-            }
+            if (!player.isSneaking() && block.getType().isInteractable()) return;
         }
 
         if (event.isCancelled() || event.useItemInHand() == org.bukkit.event.Event.Result.DENY) {
