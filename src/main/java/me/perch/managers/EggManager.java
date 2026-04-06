@@ -215,6 +215,10 @@ public class EggManager {
             addStat(stats, "Type", formatKey(rabbit.getRabbitType().name()), true);
         }
 
+        if (entity instanceof Creeper creeper) {
+            addStat(stats, "Charged", (creeper.isPowered() ? "Yes" : "No"), false);
+        }
+
         if (entity instanceof Pig pig) try { addStat(stats, "Variant", formatKey(pig.getVariant()), true); } catch (NoSuchMethodError ignored) {}
         if (entity instanceof Cow cow && !(cow instanceof MushroomCow)) try { addStat(stats, "Variant", formatKey(cow.getVariant()), true); } catch (NoSuchMethodError ignored) {}
         if (entity instanceof Chicken chicken) try { addStat(stats, "Variant", formatKey(chicken.getVariant()), true); } catch (NoSuchMethodError ignored) {}
