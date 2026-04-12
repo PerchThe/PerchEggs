@@ -523,11 +523,10 @@ public class EggListener implements Listener {
     }
 
     private void giveOrDrop(Player player, ItemStack item) {
-        java.util.Map<Integer, ItemStack> leftovers = player.getInventory().addItem(item);
-        if (!leftovers.isEmpty()) {
-            for (ItemStack leftover : leftovers.values()) {
-                player.getWorld().dropItem(player.getLocation(), leftover);
+        if (player.getInventory().firstEmpty() != -1) {
+            player.getInventory().addItem(item);
+        } else {
+            player.getWorld().dropItem(player.getLocation(), item);
             }
         }
     }
-}
