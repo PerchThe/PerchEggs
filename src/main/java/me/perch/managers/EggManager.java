@@ -11,14 +11,20 @@ import org.bukkit.Keyed;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.*;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SpawnEggMeta;
 import org.bukkit.persistence.PersistentDataType;
-
+import org.bukkit.util.io.BukkitObjectInputStream;
+import org.bukkit.util.io.BukkitObjectOutputStream;
+import org.bukkit.inventory.MerchantRecipe;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,6 +36,7 @@ public class EggManager {
     private final NamespacedKey keyMaxUses;
     private final NamespacedKey keyOriginalName;
     private final NamespacedKey keyProjectileUses;
+    private final NamespacedKey keyPassengerEgg;
 
     public EggManager(Eggs plugin) {
         this.plugin = plugin;
@@ -38,11 +45,13 @@ public class EggManager {
         this.keyMaxUses = new NamespacedKey(plugin, "max_uses");
         this.keyOriginalName = new NamespacedKey(plugin, "original_name");
         this.keyProjectileUses = new NamespacedKey(plugin, "projectile_uses");
+        this.keyPassengerEgg = new NamespacedKey(plugin, "passenger_egg");
     }
 
     public NamespacedKey getKeyUses() { return keyUses; }
     public NamespacedKey getKeyOriginalName() { return keyOriginalName; }
     public NamespacedKey getKeyProjectileUses() { return keyProjectileUses; }
+    public NamespacedKey getKeyPassengerEgg() { return keyPassengerEgg; }
 
     public boolean isPerchEgg(ItemStack item) {
         if (item == null || !item.hasItemMeta()) return false;
@@ -98,6 +107,79 @@ public class EggManager {
         meta.lore(lore);
     }
 
+    public ItemStack createFilledSpawnEggWithPassenger(LivingEntity vehicle, LivingEntity passenger) {
+        ItemStack vehicleEgg = createFilledSpawnEgg(vehicle);
+        if (vehicleEgg == null) return null;
+
+        ItemStack passengerEgg = createFilledSpawnEgg(passenger);
+        if (passengerEgg == null) return null;
+
+        ItemMeta meta = vehicleEgg.getItemMeta();
+        if (!(meta instanceof SpawnEggMeta spawnEggMeta)) return vehicleEgg;
+
+        try {
+            byte[] passengerEggBytes = serializeItemStack(passengerEgg);
+            spawnEggMeta.getPersistentDataContainer().set(keyPassengerEgg, PersistentDataType.BYTE_ARRAY, passengerEggBytes);
+
+            List<Component> lore = spawnEggMeta.lore();
+            if (lore == null) lore = new ArrayList<>();
+
+            String passengerName = formatKey(passenger.getType().name());
+
+            if (passenger instanceof Ageable ageable && !ageable.isAdult()) {
+                passengerName += " (Baby)";
+            }
+
+            Component passengerLine = plugin.getConfigManager()
+                    .parse("<white>Passenger: <#FFFF3A>" + passengerName)
+                    .decoration(TextDecoration.ITALIC, false);
+
+            if (lore.size() >= 1) {
+                lore.add(1, passengerLine);
+            } else {
+                lore.add(passengerLine);
+            }
+
+            spawnEggMeta.lore(lore);
+            vehicleEgg.setItemMeta(spawnEggMeta);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+
+        return vehicleEgg;
+    }
+
+    public ItemStack getPassengerEgg(ItemMeta meta) {
+        if (meta == null) return null;
+        if (!meta.getPersistentDataContainer().has(keyPassengerEgg, PersistentDataType.BYTE_ARRAY)) return null;
+
+        byte[] bytes = meta.getPersistentDataContainer().get(keyPassengerEgg, PersistentDataType.BYTE_ARRAY);
+        if (bytes == null) return null;
+
+        try {
+            return deserializeItemStack(bytes);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private byte[] serializeItemStack(ItemStack item) throws Exception {
+        ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
+        try (BukkitObjectOutputStream out = new BukkitObjectOutputStream(byteOut)) {
+            out.writeObject(item);
+        }
+        return byteOut.toByteArray();
+    }
+
+    private ItemStack deserializeItemStack(byte[] bytes) throws Exception {
+        ByteArrayInputStream byteIn = new ByteArrayInputStream(bytes);
+        try (BukkitObjectInputStream in = new BukkitObjectInputStream(byteIn)) {
+            return (ItemStack) in.readObject();
+        }
+    }
+
     public ItemStack createFilledSpawnEgg(LivingEntity entity) {
         ConfigManager cm = plugin.getConfigManager();
 
@@ -120,15 +202,7 @@ public class EggManager {
             typeName += " (Baby)";
         }
 
-        String simpleName;
-        if (entity.customName() != null) {
-            simpleName = PlainTextComponentSerializer.plainText().serialize(entity.customName());
-        } else {
-            simpleName = formatKey(entity.getType().name());
-            if (entity instanceof Ageable ageable && !ageable.isAdult()) {
-                simpleName += " (Baby)";
-            }
-        }
+        String simpleName = getDisplayEntityName(entity);
 
         Component nameComponent = Component.text(simpleName);
         String formatString = cm.getFilledEggNameFormat();
@@ -172,9 +246,7 @@ public class EggManager {
 
         if (entity instanceof Tameable tameable && tameable.isTamed() && tameable.getOwner() != null) {
             String ownerName = tameable.getOwner().getName();
-            if (ownerName != null) {
-                addStat(stats, "Owner", ownerName, false);
-            }
+            if (ownerName != null) addStat(stats, "Owner", ownerName, false);
         }
 
         if (entity instanceof Steerable steerable && !(entity instanceof AbstractHorse)) {
@@ -188,51 +260,29 @@ public class EggManager {
             }
         }
 
-        if (entity instanceof IronGolem ironGolem) {
-            addStat(stats, "Built By", (ironGolem.isPlayerCreated() ? "Player" : "Village"), false);
-        }
-
-        if (entity instanceof Snowman snowman) {
-            addStat(stats, "Pumpkin", (snowman.isDerp() ? "Yes" : "No"), false);
-        }
+        if (entity instanceof IronGolem ironGolem) addStat(stats, "Built By", (ironGolem.isPlayerCreated() ? "Player" : "Village"), false);
+        if (entity instanceof Snowman snowman) addStat(stats, "Pumpkin", (snowman.isDerp() ? "Yes" : "No"), false);
 
         if (entity instanceof Bee bee) {
             addStat(stats, "Nectar", (bee.hasNectar() ? "Yes" : "No"), false);
-            if (bee.getAnger() > 0) {
-                addStat(stats, "Mood", "<red>Angry", false);
-            }
+            if (bee.getAnger() > 0) addStat(stats, "Mood", "<red>Angry", false);
         }
 
-        if (entity instanceof Slime slime) {
-            addStat(stats, "Size", String.valueOf(slime.getSize()), false);
-        }
-
-        if (entity instanceof Fox fox) {
-            addStat(stats, "Type", formatKey(fox.getFoxType().name()), true);
-        }
-
-        if (entity instanceof Rabbit rabbit) {
-            addStat(stats, "Type", formatKey(rabbit.getRabbitType().name()), true);
-        }
-
-        if (entity instanceof Creeper creeper) {
-            addStat(stats, "Charged", (creeper.isPowered() ? "Yes" : "No"), false);
-        }
+        if (entity instanceof Slime slime) addStat(stats, "Size", String.valueOf(slime.getSize()), false);
+        if (entity instanceof Fox fox) addStat(stats, "Type", formatKey(fox.getFoxType().name()), true);
+        if (entity instanceof Rabbit rabbit) addStat(stats, "Type", formatKey(rabbit.getRabbitType().name()), true);
+        if (entity instanceof Creeper creeper) addStat(stats, "Charged", (creeper.isPowered() ? "Yes" : "No"), false);
 
         if (entity instanceof AbstractNautilus abstractnautilus) {
             ItemStack armor = abstractnautilus.getInventory().getArmor();
             if (armor != null && armor.getType() != Material.AIR) {
                 addStat(stats, "Armor", formatKey(armor.getType().name().replace("_NAUTILUS_ARMOR", "")), true);
             }
-
             boolean hasSaddle = abstractnautilus.getInventory().getSaddle() != null;
             addStat(stats, "Saddle", (hasSaddle ? "Yes" : "No"), false);
         }
 
-
-        if (entity instanceof ZombieNautilus zombienautilus) {
-            addStat(stats, "Variant", formatKey(zombienautilus.getVariant()), true);
-        }
+        if (entity instanceof ZombieNautilus zombienautilus) addStat(stats, "Variant", formatKey(zombienautilus.getVariant()), true);
 
         if (entity instanceof Pig pig) try { addStat(stats, "Variant", formatKey(pig.getVariant()), true); } catch (NoSuchMethodError ignored) {}
         if (entity instanceof Cow cow && !(cow instanceof MushroomCow)) try { addStat(stats, "Variant", formatKey(cow.getVariant()), true); } catch (NoSuchMethodError ignored) {}
@@ -297,7 +347,10 @@ public class EggManager {
             if (cat.isTamed()) addStat(stats, "Collar", formatKey(cat.getCollarColor().name()), true);
         }
 
-        if (entity instanceof Sheep sheep) addStat(stats, "Color", formatKey(sheep.getColor().name()), true);
+        if (entity instanceof Sheep sheep) {
+            addStat(stats, "Color", formatKey(sheep.getColor().name()), true);
+            addStat(stats, "Sheared", sheep.isSheared() ? "Yes" : "No", false);
+        }
         if (entity instanceof Parrot parrot) addStat(stats, "Variant", formatKey(parrot.getVariant().name()), true);
         if (entity instanceof Axolotl axolotl) addStat(stats, "Variant", formatKey(axolotl.getVariant().name()), true);
         if (entity instanceof MushroomCow mooshroom) addStat(stats, "Variant", formatKey(mooshroom.getVariant().name()), true);
@@ -341,13 +394,87 @@ public class EggManager {
             return Integer.compare(text2.length(), text1.length());
         });
 
-        for (StatEntry entry : stats) {
-            finalLore.add(entry.component());
-        }
+        for (StatEntry entry : stats) finalLore.add(entry.component());
 
+        if (entity instanceof Villager villager) {
+
+            List<MerchantRecipe> recipes = villager.getRecipes();
+
+            if (recipes != null && !recipes.isEmpty()) {
+
+                finalLore.add(
+                        plugin.getConfigManager()
+                                .parse("<white>Trades:")
+                                .decoration(TextDecoration.ITALIC, false)
+                );
+
+                int shownTrades = 0;
+
+                for (MerchantRecipe recipe : recipes) {
+
+                    if (shownTrades >= 20) break;
+
+                    ItemStack result = recipe.getResult();
+
+                    if (result == null || result.getType() == Material.AIR) continue;
+
+                    String tradeName;
+
+                    if (result.getType() == Material.ENCHANTED_BOOK
+                            && result.getItemMeta() instanceof EnchantmentStorageMeta enchantmeta
+                            && !enchantmeta.getStoredEnchants().isEmpty()) {
+
+                        Enchantment enchant = enchantmeta.getStoredEnchants().keySet().iterator().next();
+                        int level = enchantmeta.getStoredEnchants().get(enchant);
+
+                        String enchantName = formatKey(
+                                enchant.getKey().getKey()
+                                        .replace("_", " ")
+                        );
+
+                        tradeName = enchantName + " " + toRoman(level);
+
+                    } else {
+
+                        tradeName = formatKey(result.getType().name());
+
+                        if (result.getAmount() > 1) {
+                            tradeName = result.getAmount() + "x " + tradeName;
+                        }
+                    }
+
+                    finalLore.add(
+                            plugin.getConfigManager()
+                                    .parse("  <#FFFF3A>" + tradeName)
+                                    .decoration(TextDecoration.ITALIC, false)
+                    );
+
+                    shownTrades++;
+                }
+
+                if (recipes.size() > shownTrades) {
+                    finalLore.add(
+                            plugin.getConfigManager()
+                                    .parse("<gray>+" + (recipes.size() - shownTrades) + " more...")
+                                    .decoration(TextDecoration.ITALIC, false)
+                    );
+                }
+            }
+        }
         meta.lore(finalLore);
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    private String getDisplayEntityName(LivingEntity entity) {
+        String simpleName;
+        if (entity.customName() != null) {
+            simpleName = PlainTextComponentSerializer.plainText().serialize(entity.customName());
+        } else {
+            simpleName = formatKey(entity.getType().name());
+            if (entity instanceof Ageable ageable && !ageable.isAdult()) simpleName += " (Baby)";
+        }
+        return simpleName;
     }
 
     private String getHearts(double current, double max) {
@@ -358,20 +485,15 @@ public class EggManager {
         if (currentHearts > displayMax) currentHearts = displayMax;
 
         for (int i = 0; i < displayMax; i++) {
-            if (i < currentHearts) {
-                hearts.append("❤");
-            } else {
-                hearts.append("<gray>❤</gray><red>");
-            }
+            if (i < currentHearts) hearts.append("❤");
+            else hearts.append("<gray>❤</gray><red>");
         }
         return hearts.toString();
     }
 
     private void addStat(List<StatEntry> list, String label, String value, boolean useColorLogic) {
         String colorPrefix = plugin.getConfigManager().getFilledEggDefaultColor();
-        if (useColorLogic) {
-            colorPrefix = guessColor(value);
-        }
+        if (useColorLogic) colorPrefix = guessColor(value);
         String rawFormat = plugin.getConfigManager().getFilledEggStatFormat();
         rawFormat = rawFormat.replace("%label%", label).replace("%value%", colorPrefix + value);
         Component c = plugin.getConfigManager().parse(rawFormat).decoration(TextDecoration.ITALIC, false);
@@ -381,19 +503,17 @@ public class EggManager {
     private String guessColor(String text) {
         String upper = text.toUpperCase();
 
-        if (upper.contains("TEMPERATE")) return "<#DA8648>"; // Orange-ish
-        if (upper.contains("WARM")) return "<#EFEFEF>";     // White/Gray
-        if (upper.contains("COLD")) return "<#4D7A47>";     // Green
+        if (upper.contains("TEMPERATE")) return "<#DA8648>";
+        if (upper.contains("WARM")) return "<#EFEFEF>";
+        if (upper.contains("COLD")) return "<#4D7A47>";
 
-        if (upper.contains("DESERT")) return "<#E3BC7A>";   // Sand
-        if (upper.contains("SAVANNA")) return "<#E36E34>";  // Acacia Orange
-        if (upper.contains("SNOW")) return "<#F0F8FF>";     // Snow White
-        if (upper.contains("TAIGA")) return "<#587056>";    // Spruce Green
-        if (upper.contains("JUNGLE")) return "<#466D38>";   // Jungle Green
-        if (upper.contains("SWAMP")) return "<#5D4939>";    // Muddy Brown
-        if (upper.contains("PLAINS")) return "<#91BD59>";   // Grass Green
-
-        if (upper.contains("SNOW")) return "<white>";
+        if (upper.contains("DESERT")) return "<#E3BC7A>";
+        if (upper.contains("SAVANNA")) return "<#E36E34>";
+        if (upper.contains("SNOW")) return "<#F0F8FF>";
+        if (upper.contains("TAIGA")) return "<#587056>";
+        if (upper.contains("JUNGLE")) return "<#466D38>";
+        if (upper.contains("SWAMP")) return "<#5D4939>";
+        if (upper.contains("PLAINS")) return "<#91BD59>";
 
         if (upper.contains("WHITE")) return "<white>";
         if (upper.contains("ORANGE")) return "<gold>";
@@ -423,6 +543,17 @@ public class EggManager {
         return plugin.getConfigManager().getFilledEggDefaultColor();
     }
 
+    private String toRoman(int number) {
+        return switch (number) {
+            case 1 -> "I";
+            case 2 -> "II";
+            case 3 -> "III";
+            case 4 -> "IV";
+            case 5 -> "V";
+            default -> String.valueOf(number);
+        };
+    }
+
     private double toBlockHeight(double x) {
         return -0.1817584952 * Math.pow(x, 3) + 3.689713992 * Math.pow(x, 2) + 2.128599134 * x - 0.343930367;
     }
@@ -430,11 +561,9 @@ public class EggManager {
     private String formatKey(Object input) {
         if (input == null) return "Unknown";
         String key;
-        if (input instanceof Keyed keyed) {
-            key = keyed.getKey().getKey();
-        } else {
-            key = input.toString();
-        }
+        if (input instanceof Keyed keyed) key = keyed.getKey().getKey();
+        else key = input.toString();
+
         key = key.replace("_", " ").toLowerCase();
 
         StringBuilder result = new StringBuilder();
