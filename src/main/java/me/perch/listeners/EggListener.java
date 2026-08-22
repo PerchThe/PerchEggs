@@ -114,11 +114,6 @@ public class EggListener implements Listener {
 
         if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
 
-        if (event.getAction() == Action.RIGHT_CLICK_BLOCK && event.getClickedBlock() != null) {
-            Block block = event.getClickedBlock();
-            if (!player.isSneaking() && block.getType().isInteractable()) return;
-        }
-
         ItemStack item = event.getItem();
         EggManager em = plugin.getEggManager();
 
@@ -265,10 +260,20 @@ public class EggListener implements Listener {
                 else player.getInventory().setItemInMainHand(null);
             } else {
                 int newUses = uses - 1;
-                ItemMeta meta = handItem.getItemMeta();
+                boolean splitStack = handItem.getAmount() > 1;
+                ItemStack usedEgg = splitStack ? handItem.clone() : handItem;
+
+                if (splitStack) {
+                    usedEgg.setAmount(1);
+                    handItem.setAmount(handItem.getAmount() - 1);
+                }
+
+                ItemMeta meta = usedEgg.getItemMeta();
                 meta.getPersistentDataContainer().set(em.getKeyUses(), PersistentDataType.INTEGER, newUses);
                 em.updateEggVisuals(meta, newUses);
-                handItem.setItemMeta(meta);
+                usedEgg.setItemMeta(meta);
+
+                if (splitStack) giveOrDrop(player, usedEgg);
             }
         }
     }

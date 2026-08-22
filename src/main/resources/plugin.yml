@@ -2,7 +2,7 @@ name: PerchEggs
 version: 1.0.0
 main: me.perch.Eggs
 api-version: 1.21
-author: KayaLambrex
+authors: [KayaLambrex, Dypel]
 permissions:
   percheggs.use:
     description: Allows using the Perch Eggs
