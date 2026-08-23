@@ -610,7 +610,10 @@ public class EggListener implements Listener {
     }
 
     private void giveOrDrop(Player player, ItemStack item) {
-        if (player.getInventory().firstEmpty() != -1) player.getInventory().addItem(item);
-        else player.getWorld().dropItem(player.getLocation(), item);
+        if (player.getInventory().firstEmpty() != -1) {
+            player.getInventory().addItem(item);
+        } else {
+            player.getWorld().dropItem(player.getLocation(), item);
+            }
+        }
     }
-}
