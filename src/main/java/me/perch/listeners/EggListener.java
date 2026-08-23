@@ -11,6 +11,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.*;
@@ -58,9 +59,7 @@ public class EggListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onMobSpawn(CreatureSpawnEvent event) {
-        if (spawningCustomEgg) {
-            event.setCancelled(false);
-        }
+        if (spawningCustomEgg) event.setCancelled(false);
     }
 
     @EventHandler
@@ -100,9 +99,7 @@ public class EggListener implements Listener {
                 return;
             }
         }
-        if (entitiesBeingCaught.contains(event.getDamager().getUniqueId())) {
-            event.setCancelled(true);
-        }
+        if (entitiesBeingCaught.contains(event.getDamager().getUniqueId())) event.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -117,17 +114,6 @@ public class EggListener implements Listener {
 
         if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
 
-        if (event.getAction() == Action.RIGHT_CLICK_BLOCK && event.getClickedBlock() != null) {
-            String blockName = event.getClickedBlock().getType().name();
-            if (blockName.contains("SIGN")) {
-                return;
-            }
-        }
-
-        if (event.isCancelled() || event.useItemInHand() == org.bukkit.event.Event.Result.DENY) {
-            return;
-        }
-
         ItemStack item = event.getItem();
         EggManager em = plugin.getEggManager();
 
@@ -135,6 +121,11 @@ public class EggListener implements Listener {
 
         if (item.getType() != plugin.getConfigManager().getEggMaterial()) {
             if (event.getAction() == Action.RIGHT_CLICK_BLOCK && event.getClickedBlock() != null) {
+                Material clickedType = event.getClickedBlock().getType();
+                boolean shouldUseBlock = clickedType.isInteractable()
+                        && !Tag.FENCES.isTagged(clickedType)
+                        && clickedType != Material.SWEET_BERRY_BUSH;
+                if (!player.isSneaking() && shouldUseBlock) return;
                 handleFilledEggPlacement(event, player, item, em);
             }
             return;
@@ -162,9 +153,7 @@ public class EggListener implements Listener {
 
         player.playSound(player.getLocation(), Sound.ENTITY_EGG_THROW, 0.5f, 1.2f);
 
-        if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
-            item.setAmount(item.getAmount() - 1);
-        }
+        if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) item.setAmount(item.getAmount() - 1);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -187,7 +176,7 @@ public class EggListener implements Listener {
         boolean catchStarted = false;
 
         if (!event.isCancelled() && event.getHitEntity() instanceof LivingEntity target && !(target instanceof Player) && shooter != null) {
-            catchStarted = attemptCatchSequence(shooter, target, uses, null, em, plugin.getConfigManager());
+            catchStarted = attemptCatchSequence(shooter, target, uses, null, em, plugin.getConfigManager(), true);
         }
 
         if (catchStarted) {
@@ -199,18 +188,14 @@ public class EggListener implements Listener {
         boolean gpRefundExpected = false;
 
         if (shooter != null) {
-            if (isPermissionDenied(shooter, dropLoc)) {
-                gpRefundExpected = true;
-            }
+            if (isPermissionDenied(shooter, dropLoc)) gpRefundExpected = true;
 
             if (shooter.getGameMode() != org.bukkit.GameMode.CREATIVE) {
                 ItemStack refundItem = em.createPerchEgg(uses);
                 giveOrDrop(shooter, refundItem);
                 shooter.playSound(shooter.getLocation(), Sound.ENTITY_ITEM_PICKUP, 0.5f, 1.5f);
 
-                if (gpRefundExpected) {
-                    removeOneVanillaEgg(shooter);
-                }
+                if (gpRefundExpected) removeOneVanillaEgg(shooter);
             }
         } else {
             ItemStack refundItem = em.createPerchEgg(uses);
@@ -255,6 +240,11 @@ public class EggListener implements Listener {
         EggManager em = plugin.getEggManager();
         ConfigManager cm = plugin.getConfigManager();
 
+        if (em.isPerchEgg(handItem) && handItem.getType() != cm.getEggMaterial()) {
+            event.setCancelled(true);
+            return;
+        }
+
         if (!em.isPerchEgg(handItem)) return;
         if (handItem.getType() != cm.getEggMaterial()) return;
 
@@ -267,21 +257,29 @@ public class EggListener implements Listener {
             uses = handItem.getItemMeta().getPersistentDataContainer().get(em.getKeyUses(), PersistentDataType.INTEGER);
         }
 
-        boolean success = attemptCatchSequence(player, livingTarget, uses, handItem, em, cm);
+        boolean captureStack = !player.isSneaking();
+        boolean success = attemptCatchSequence(player, livingTarget, uses, handItem, em, cm, captureStack);
 
         if (success) {
             if (uses <= 1) {
-                if (handItem.getAmount() > 1) {
-                    handItem.setAmount(handItem.getAmount() - 1);
-                } else {
-                    player.getInventory().setItemInMainHand(null);
-                }
+                if (handItem.getAmount() > 1) handItem.setAmount(handItem.getAmount() - 1);
+                else player.getInventory().setItemInMainHand(null);
             } else {
                 int newUses = uses - 1;
-                ItemMeta meta = handItem.getItemMeta();
+                boolean splitStack = handItem.getAmount() > 1;
+                ItemStack usedEgg = splitStack ? handItem.clone() : handItem;
+
+                if (splitStack) {
+                    usedEgg.setAmount(1);
+                    handItem.setAmount(handItem.getAmount() - 1);
+                }
+
+                ItemMeta meta = usedEgg.getItemMeta();
                 meta.getPersistentDataContainer().set(em.getKeyUses(), PersistentDataType.INTEGER, newUses);
                 em.updateEggVisuals(meta, newUses);
-                handItem.setItemMeta(meta);
+                usedEgg.setItemMeta(meta);
+
+                if (splitStack) giveOrDrop(player, usedEgg);
             }
         }
     }
@@ -316,10 +314,29 @@ public class EggListener implements Listener {
 
             if (spawned == null) return;
 
-            String currentNameSerialized = "";
-            if (meta.displayName() != null) {
-                currentNameSerialized = MiniMessage.miniMessage().serialize(meta.displayName());
+            ItemStack passengerEgg = em.getPassengerEgg(meta);
+            if (passengerEgg != null && passengerEgg.getItemMeta() instanceof SpawnEggMeta passengerMeta) {
+                EntitySnapshot passengerSnapshot = passengerMeta.getSpawnedEntity();
+                if (passengerSnapshot != null) {
+                    spawningCustomEgg = true;
+                    try {
+                        Entity passenger = passengerSnapshot.createEntity(spawnLoc);
+                        if (passenger != null) {
+                            spawned.addPassenger(passenger);
+                            if (passenger instanceof LivingEntity livingPassenger) {
+                                freezeEntity(livingPassenger, 30);
+                            }
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    } finally {
+                        spawningCustomEgg = false;
+                    }
+                }
             }
+
+            String currentNameSerialized = "";
+            if (meta.displayName() != null) currentNameSerialized = MiniMessage.miniMessage().serialize(meta.displayName());
 
             String originalNameSerialized = meta.getPersistentDataContainer().get(em.getKeyOriginalName(), PersistentDataType.STRING);
 
@@ -328,9 +345,7 @@ public class EggListener implements Listener {
                 spawned.setCustomNameVisible(true);
             }
 
-            if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
-                item.setAmount(item.getAmount() - 1);
-            }
+            if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) item.setAmount(item.getAmount() - 1);
 
             if (spawned instanceof LivingEntity livingSpawned) {
                 freezeEntity(livingSpawned, 30);
@@ -338,11 +353,28 @@ public class EggListener implements Listener {
             } else {
                 playSpawnAnimation(spawnLoc, null);
             }
+
         }
     }
 
-    private boolean attemptCatchSequence(Player player, LivingEntity livingTarget, int uses, ItemStack handItem, EggManager em, ConfigManager cm) {
+    private boolean attemptCatchSequence(Player player, LivingEntity clickedTarget, int uses, ItemStack handItem, EggManager em, ConfigManager cm, boolean captureStack) {
+        LivingEntity livingTarget = clickedTarget;
+        LivingEntity passengerToCatch = null;
+
+        if (captureStack) {
+            if (clickedTarget.getVehicle() instanceof LivingEntity vehicle && !(vehicle instanceof Player)) {
+                livingTarget = vehicle;
+                passengerToCatch = clickedTarget;
+            } else if (!clickedTarget.getPassengers().isEmpty()) {
+                Entity passenger = clickedTarget.getPassengers().get(0);
+                if (passenger instanceof LivingEntity livingPassenger && !(passenger instanceof Player)) {
+                    passengerToCatch = livingPassenger;
+                }
+            }
+        }
+
         if (caughtPlayers.contains(player.getUniqueId()) || entitiesBeingCaught.contains(livingTarget.getUniqueId())) return false;
+        if (passengerToCatch != null && entitiesBeingCaught.contains(passengerToCatch.getUniqueId())) return false;
 
         if (!player.hasPermission("percheggs.use")) {
             player.sendMessage(cm.getMessage("messages.no-permission"));
@@ -354,22 +386,44 @@ public class EggListener implements Listener {
             return false;
         }
 
-        String typeName = livingTarget.getType().name();
-        boolean isBlacklisted = cm.getBlacklist().stream().anyMatch(s -> s.equalsIgnoreCase(typeName));
-
-        if (isBlacklisted) {
+        if (isBlacklisted(livingTarget, cm) || (passengerToCatch != null && isBlacklisted(passengerToCatch, cm))) {
             player.sendMessage(cm.getMessage("messages.catch-fail-type"));
             return false;
         }
 
-        if (livingTarget instanceof Tameable tameable && tameable.isTamed()) {
-            if (tameable.getOwner() != null && !tameable.getOwner().getUniqueId().equals(player.getUniqueId())) {
-                player.sendMessage(cm.getMessage("messages.catch-fail-type"));
-                return false;
+        if (!canCatchTamed(player, livingTarget) || (passengerToCatch != null && !canCatchTamed(player, passengerToCatch))) {
+            player.sendMessage(cm.getMessage("messages.catch-fail-type"));
+            return false;
+        }
+
+        if (!captureStack) {
+            if (!livingTarget.getPassengers().isEmpty()) {
+                livingTarget.eject();
+            }
+
+            if (livingTarget.getVehicle() != null) {
+                livingTarget.leaveVehicle();
             }
         }
 
-        ItemStack potentialEgg = em.createFilledSpawnEgg(livingTarget);
+        ItemStack potentialEgg;
+
+        if (passengerToCatch != null) {
+            livingTarget.eject();
+            passengerToCatch.leaveVehicle();
+
+            potentialEgg = em.createFilledSpawnEggWithPassenger(livingTarget, passengerToCatch);
+
+            livingTarget.addPassenger(passengerToCatch);
+        } else {
+            if (!captureStack) {
+                livingTarget.eject();
+                livingTarget.leaveVehicle();
+            }
+
+            potentialEgg = em.createFilledSpawnEgg(livingTarget);
+        }
+
         if (potentialEgg == null) {
             player.sendMessage(cm.getMessage("messages.catch-fail-type"));
             return false;
@@ -377,17 +431,18 @@ public class EggListener implements Listener {
 
         caughtPlayers.add(player.getUniqueId());
         entitiesBeingCaught.add(livingTarget.getUniqueId());
+        if (passengerToCatch != null) entitiesBeingCaught.add(passengerToCatch.getUniqueId());
 
-        livingTarget.setInvulnerable(true);
-        livingTarget.setFireTicks(0);
-        if (livingTarget instanceof Mob mob) mob.setTarget(null);
+        prepareEntityForCatch(livingTarget);
+        freezeEntity(livingTarget, 60);
 
-        if (livingTarget instanceof Creeper creeper) {
-            creeper.setIgnited(false);
-            creeper.setFuseTicks(0);
+        if (passengerToCatch != null) {
+            prepareEntityForCatch(passengerToCatch);
+            freezeEntity(passengerToCatch, 60);
         }
 
-        freezeEntity(livingTarget, 60);
+        final LivingEntity finalLivingTarget = livingTarget;
+        final LivingEntity finalPassengerToCatch = passengerToCatch;
 
         new BukkitRunnable() {
             int ticks = 0;
@@ -395,8 +450,7 @@ public class EggListener implements Listener {
 
             @Override
             public void run() {
-                if (!livingTarget.isValid() || !player.isOnline()) {
-
+                if (!finalLivingTarget.isValid() || !player.isOnline()) {
                     if (player.isOnline() && handItem == null) {
                         ItemStack refund = em.createPerchEgg(uses);
                         giveOrDrop(player, refund);
@@ -408,12 +462,12 @@ public class EggListener implements Listener {
                     return;
                 }
 
-                Location mobLoc = livingTarget.getLocation();
+                Location mobLoc = finalLivingTarget.getLocation();
                 Location playerLoc = player.getLocation().add(0, 1.0, 0);
                 double distSq = mobLoc.distanceSquared(playerLoc);
 
                 if (distSq < 0.65 || ticks >= maxTicks) {
-                    completeCatch(player, livingTarget, em, cm, potentialEgg, uses, handItem != null);
+                    completeCatch(player, finalLivingTarget, finalPassengerToCatch, em, potentialEgg, uses, handItem != null);
                     cleanup();
                     this.cancel();
                     return;
@@ -423,7 +477,7 @@ public class EggListener implements Listener {
                 double speed = 0.2 + (ticks * 0.015);
                 if (speed > 0.6) speed = 0.6;
 
-                livingTarget.setVelocity(direction.multiply(speed));
+                finalLivingTarget.setVelocity(direction.multiply(speed));
 
                 player.getWorld().spawnParticle(Particle.END_ROD, mobLoc.add(0, 0.5, 0), 1, 0, 0, 0, 0);
 
@@ -437,18 +491,51 @@ public class EggListener implements Listener {
 
             private void cleanup() {
                 caughtPlayers.remove(player.getUniqueId());
-                entitiesBeingCaught.remove(livingTarget.getUniqueId());
-                if (livingTarget.isValid()) {
-                    livingTarget.setInvulnerable(false);
-                }
+                entitiesBeingCaught.remove(finalLivingTarget.getUniqueId());
+                if (finalPassengerToCatch != null) entitiesBeingCaught.remove(finalPassengerToCatch.getUniqueId());
+
+                if (finalLivingTarget.isValid()) finalLivingTarget.setInvulnerable(false);
+                if (finalPassengerToCatch != null && finalPassengerToCatch.isValid()) finalPassengerToCatch.setInvulnerable(false);
             }
         }.runTaskTimer(plugin, 0L, 1L);
 
         return true;
     }
 
-    private void completeCatch(Player player, LivingEntity livingTarget, EggManager em, ConfigManager cm, ItemStack spawnEgg, int originalUses, boolean wasHandInteraction) {
+    private boolean isBlacklisted(LivingEntity entity, ConfigManager cm) {
+        String typeName = entity.getType().name();
+        return cm.getBlacklist().stream().anyMatch(s -> s.equalsIgnoreCase(typeName));
+    }
+
+    private boolean canCatchTamed(Player player, LivingEntity entity) {
+        if (entity instanceof Tameable tameable && tameable.isTamed()) {
+            return tameable.getOwner() == null || tameable.getOwner().getUniqueId().equals(player.getUniqueId());
+        }
+        return true;
+    }
+
+    private void prepareEntityForCatch(LivingEntity entity) {
+        entity.setInvulnerable(true);
+        entity.setFireTicks(0);
+        if (entity instanceof Mob mob) mob.setTarget(null);
+
+        if (entity instanceof Creeper creeper) {
+            creeper.setIgnited(false);
+            creeper.setFuseTicks(0);
+        }
+    }
+
+    private void completeCatch(Player player, LivingEntity livingTarget, LivingEntity passengerToCatch, EggManager em, ItemStack spawnEgg, int originalUses, boolean wasHandInteraction) {
         Location catchLocation = livingTarget.getLocation().add(0, 0.5, 0);
+
+        if (passengerToCatch != null && passengerToCatch.isValid()) {
+            passengerToCatch.remove();
+        } else if (!livingTarget.getPassengers().isEmpty()) {
+            // Shift-clicking the base entity should catch only the clicked/base mob.
+            // Eject passengers first so they remain in the world instead of being removed with the vehicle.
+            livingTarget.eject();
+        }
+
         livingTarget.remove();
 
         catchLocation.getWorld().spawnParticle(Particle.CLOUD, catchLocation, 10, 0.3, 0.3, 0.3, 0.1);
