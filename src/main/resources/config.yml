@@ -1,15 +1,15 @@
 items:
   empty-egg:
-    name: "&#48ab76Mob Egg &f(Uses: &#FFFF3A%uses%&f)"
+    name: "&#48ab76Mob Egg &f(Uses: &#7db597%uses%&f)"
     lore:
-      - "&#FFFF3ARight Click &fa mob to catch it!"
+      - "&#7db597Right Click &fa mob to catch it!"
     material: BROWN_EGG
 
   filled-egg:
-    name-format: "&#48ab76Mob Egg <reset>(&#FFFF3A<name>&f)"
-    header-format: "&fContains: &#FFFF3A<name>"
+    name-format: "&#48ab76Mob Egg <reset>(&#7db597<name>&f)"
+    header-format: "&fContains: &#7db597<name>"
     stat-format: "<white>%label%: %value%"
-    default-stat-color: "<#FFFF3A>"
+    default-stat-color: "<#7db597>"
 
 messages:
   prefix: "&8» &f"
