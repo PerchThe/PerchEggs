@@ -19,6 +19,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityCombustEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -69,6 +70,13 @@ public class EggListener implements Listener {
         if (egg.getPersistentDataContainer().has(em.getKeyProjectileUses(), PersistentDataType.INTEGER)) {
             event.setHatching(false);
             event.setNumHatches((byte) 0);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onBlockDispense(BlockDispenseEvent event) {
+        if (plugin.getEggManager().isPerchEgg(event.getItem())) {
+            event.setCancelled(true);
         }
     }
 
